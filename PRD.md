@@ -314,6 +314,66 @@ When spawning pi, the backend constructs the subprocess environment from an expl
 
 Secrets present in the user's login shell (e.g. `AWS_SECRET_ACCESS_KEY` in `.zshrc`) are **not** forwarded unless the user has explicitly entered them in the Settings UI.
 
+### 7.6 Hooks & Extension Integration
+
+pi has a first-class hooks system that the desktop shell can leverage without writing any pi internals. There are two layers:
+
+**Extension hooks (`pi.on()`)** — registered inside TypeScript extension files placed at `~/.pi/agent/hooks/*.ts` (global) or `.pi/hooks/*.ts` (project-local inside the attached folder). pi loads them automatically on startup.
+
+**The full event catalogue available to hooks:**
+
+| Category | Events | Can cancel / modify? |
+|---|---|---|
+| Session | `session_start`, `session_before_switch`, `session_switch`, `session_shutdown` | `before_*` variants can return `{ cancel: true }` |
+| Agent loop | `before_agent_start` | Yes — can inject extra messages + rewrite system prompt |
+| Agent loop | `agent_start`, `agent_end` | No |
+| Turns | `turn_start`, `turn_end` | No |
+| Messages | `message_start`, `message_update`, `message_end` | No |
+| Tool execution | `tool_execution_start`, `tool_execution_update`, `tool_execution_end` | `tool_execution_start` can block / modify args |
+| Input | `input` | Yes — can transform text, fully handle (skip LLM), or continue |
+| Context | `context` | Yes — can rewrite the entire message array before each LLM call |
+
+#### 7.6.1 Shell-managed hooks
+
+The desktop shell ships three built-in hook files that it writes to `.pi/hooks/` inside the attached folder on session start (only if the user has the relevant feature enabled in Settings):
+
+**`shell-permissions.ts` — Tool approval gate (default: off)**
+
+Intercepts `tool_execution_start` for `bash` and `write`/`edit` tool calls. Emits a `hook:approval_request` RPC event to the shell, which renders an **Approve / Deny / Always Allow** dialog in the chat canvas. The hook blocks until the shell responds via `extension_ui_response`. Approved actions proceed; denied actions return an error result to the LLM.
+
+```
+pi stdout → hook:approval_request { toolName, args, sessionId }
+shell UI → user sees "pi wants to run: rm -rf dist/" [Approve] [Deny] [Always Allow]
+shell → extension_ui_response { id, value: "approve" | "deny" }
+```
+
+**`shell-audit.ts` — Activity log (default: on)**
+
+Subscribes to `tool_execution_start` and `tool_execution_end`. Emits a `hook:audit_event` RPC event for each tool call with the tool name, args, exit code, and duration. The shell appends these to an in-memory activity log shown in the Right Panel (Context Inspector, §6.1).
+
+**`shell-git-checkpoint.ts` — Auto git commit (default: off)**
+
+Subscribes to `turn_end`. If the attached folder is a git repo and the turn produced any file mutations, runs `git add -A && git commit -m "pi: <turn summary>"` via the `bash` tool. Gives the user a complete undo trail across the entire session.
+
+#### 7.6.2 Project hooks (user-defined)
+
+The shell surfaces a **Hooks** tab in Settings showing all `.ts` files currently loaded from the attached folder's `.pi/hooks/` directory. Users can:
+
+- View the source of each loaded hook file
+- Toggle hooks on/off without deleting them (shell writes a `disabled: true` comment header that pi respects)
+- Open the hook file in the system editor
+- Add new hook files from a template library (permission gate, git checkpoint, path protection, audit log)
+
+#### 7.6.3 Hook RPC events
+
+Hook-generated events that need shell UI interaction follow the same `extension_ui_request` / `extension_ui_response` pattern as OAuth callbacks (§7.5.3). The shell must handle these additional request types:
+
+| Request type | Shell action |
+|---|---|
+| `hook:approval_request` | Show inline approve/deny card in chat stream |
+| `hook:audit_event` | Append entry to Right Panel activity log |
+| `hook:notify` | Show transient toast notification in toolbar area |
+
 ---
 
 ## 8. Settings
@@ -345,6 +405,16 @@ Secrets present in the user's login shell (e.g. `AWS_SECRET_ACCESS_KEY` in `.zsh
 | Google Cloud Location | `GOOGLE_CLOUD_LOCATION` forwarded as env var |
 | Google credentials file | Path to service account JSON; sets `GOOGLE_APPLICATION_CREDENTIALS` |
 | Additional env vars | Freeform key-value pairs forwarded to pi subprocess on spawn |
+
+### 8.3 Hooks
+
+| Setting | Default | Description |
+|---|---|---|
+| Tool approval gate | `off` | Require user approval before `bash` and file-write tool calls |
+| Approval scope | All tools | Which tools require approval: all / bash only / write+edit only |
+| Activity log | `on` | Log all tool calls to the Right Panel activity log |
+| Git checkpoint | `off` | Auto-commit file mutations after each agent turn |
+| Git checkpoint message prefix | `pi:` | Prefix for auto-generated commit messages |
 
 ---
 
@@ -437,12 +507,13 @@ Secrets present in the user's login shell (e.g. `AWS_SECRET_ACCESS_KEY` in `.zsh
 | M1 | Week 4 | Subprocess manager: spawn with `--mode rpc`, health-check, restart policy, JSONL event parsing, env var forwarding |
 | M2 | Week 6 | Chat UI: message list, streaming tokens, markdown render, code blocks, tool-call chips |
 | M3 | Week 8 | Provider onboarding: first-run setup screen, API key entry (keychain), OAuth RPC callback handling, model picker |
-| M3 | Week 8 | File browser: folder picker, tree render, virtualisation, expand/collapse, icons |
-| M4 | Week 10 | Filesystem watching: live node updates, pulse animations, debounce, gitignore filter |
-| M5 | Week 12 | Context injection: folder attachment via `--cwd`, file drag-to-chat, chips, size-limit prompt |
-| M6 | Week 14 | Session persistence, history panel, export Markdown/JSON, settings modal |
-| M7 | Week 16 | Polish: keyboard shortcuts, responsive layout, onboarding, auto-update, notarisation |
-| M8 | Week 18 | Public beta: signed installers for macOS/Windows/Linux, telemetry opt-in, crash reporter |
+| M4 | Week 10 | File browser: folder picker, tree render, virtualisation, expand/collapse, icons |
+| M5 | Week 12 | Filesystem watching: live node updates, pulse animations, debounce, gitignore filter |
+| M6 | Week 14 | Context injection: folder attachment via `--cwd`, file drag-to-chat, chips, size-limit prompt |
+| M7 | Week 16 | Hooks: shell-managed `audit`, `approval-gate`, `git-checkpoint` hooks; Right Panel activity log; Settings → Hooks tab |
+| M8 | Week 18 | Session persistence, history panel, export Markdown/JSON, settings modal |
+| M9 | Week 20 | Polish: keyboard shortcuts, responsive layout, onboarding, auto-update, notarisation |
+| M10 | Week 22 | Public beta: signed installers for macOS/Windows/Linux, telemetry opt-in, crash reporter |
 
 ---
 
@@ -464,6 +535,8 @@ Secrets present in the user's login shell (e.g. `AWS_SECRET_ACCESS_KEY` in `.zsh
 
 - **Model picker RPC vs respawn** — ⏳ OPEN. Changing models mid-session: does pi support switching model via an RPC command, or must the subprocess be restarted with new `--model` flags? Needs verification against `docs/rpc.md`.
 
+- **Hook approval gate RPC** — ⏳ OPEN. Confirm that `extension_ui_request` / `extension_ui_response` events are fully propagated in `--mode rpc` for blocking hook interactions (approval dialogs). The docs indicate support but needs an integration test.
+
 ---
 
 ## 14. Acceptance Criteria (M7 / Feature Complete)
@@ -479,6 +552,9 @@ Secrets present in the user's login shell (e.g. `AWS_SECRET_ACCESS_KEY` in `.zsh
 - [ ] Closing and reopening the app restores the previous session history and re-attaches the last folder
 - [ ] All keyboard shortcuts listed in Section 9 function correctly on macOS and Windows
 - [ ] The panel divider can be dragged from its default position to any value in [180, 480] px and the new width is persisted
+- [ ] With the tool approval gate enabled, a `bash` tool call from pi shows an approve/deny card in the chat canvas; denying returns an error to the LLM and the agent responds accordingly
+- [ ] With the activity log enabled, every tool call (name, args, exit code) appears in the Right Panel within 500 ms of completion
+- [ ] With git checkpoint enabled, a `git log` after a session that wrote files shows one auto-commit per agent turn containing the mutated files
 
 ---
 
