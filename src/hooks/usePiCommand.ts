@@ -8,6 +8,7 @@ export function usePiCommand() {
       await invoke("pi_command", { cmd });
     } catch (err) {
       console.error("Failed to send pi command:", err);
+      throw err;
     }
   }, []);
 }

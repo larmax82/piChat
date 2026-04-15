@@ -56,7 +56,7 @@ function handleEvent(event: RpcEvent) {
           if (me.toolCall) {
             store.updateToolCall(currentMessageId, me.toolCall.id, {
               args: me.toolCall.arguments,
-              status: "pending",
+              status: "complete",
             });
           }
           break;
@@ -203,6 +203,7 @@ export function usePiEvents() {
     });
 
     return () => {
+      isSetup.current = false;
       unlisten1.then((fn) => fn());
       unlisten2.then((fn) => fn());
       unlisten3.then((fn) => fn());

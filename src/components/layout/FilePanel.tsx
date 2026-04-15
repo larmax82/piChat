@@ -11,17 +11,21 @@ function flattenTree(
   nodes: FileNode[],
   expandedDirs: Set<string>,
 ): FileNode[] {
-  const result: FileNode[] = [];
-  function walk(list: FileNode[]) {
-    for (const node of list) {
-      result.push(node);
-      if (node.isDir && expandedDirs.has(node.path) && node.children) {
-        walk(node.children);
-      }
-    }
+  // The backend sends a flat list (children are always empty).
+  // Visibility is determined by whether all ancestor directories are expanded.
+  const dirSet = new Set(nodes.filter((n) => n.isDir).map((n) => n.path));
+
+  function isVisible(path: string): boolean {
+    const lastSlash = path.lastIndexOf("/");
+    if (lastSlash === -1) return true;
+    const parentPath = path.substring(0, lastSlash);
+    // If the parent is not in the tree it's the scan root — always visible
+    if (!dirSet.has(parentPath)) return true;
+    return expandedDirs.has(parentPath) && isVisible(parentPath);
   }
-  walk(nodes);
-  return result;
+
+  // Depth-1 nodes are direct children of the attached folder — always visible
+  return nodes.filter((node) => node.depth === 1 || isVisible(node.path));
 }
 
 function getFileIcon(name: string): string {

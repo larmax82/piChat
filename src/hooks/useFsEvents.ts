@@ -30,11 +30,15 @@ function reconcileTree(tree: FileNode[], event: FsEvent): FileNode[] {
     case "created": {
       // Check if node already exists
       if (tree.some((n) => n.path === event.path)) return tree;
+      // Infer depth by finding the longest matching parent path in the tree
+      const depth = tree
+        .filter((n) => n.isDir && event.path.startsWith(n.path + "/"))
+        .reduce((max, n) => Math.max(max, n.depth + 1), 1);
       const newNode: FileNode = {
         path: event.path,
         name: fileName,
         isDir: event.isDir,
-        depth: 1, // Will be corrected by next full scan
+        depth,
         children: event.isDir ? [] : undefined,
       };
       return [...tree, newNode].sort((a, b) => {

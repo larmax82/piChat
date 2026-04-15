@@ -6,6 +6,7 @@ use fs_watcher::{scan_directory, start_watcher};
 use notify::RecommendedWatcher;
 use serde_json::Value;
 use settings::{load_settings, save_settings, AppSettings};
+use tauri::Manager;
 use std::sync::Arc;
 use subprocess::SubprocessManager;
 use tauri::Emitter;
@@ -60,7 +61,7 @@ async fn fs_watch(
     let nodes = scan_directory(&path, settings.show_gitignored);
     let _ = app.emit("fs:tree", &nodes);
 
-    let watcher = start_watcher(app, path);
+    let watcher = start_watcher(app, path, settings.show_gitignored);
     let mut w = state.watcher.lock().await;
     *w = watcher;
 
@@ -93,7 +94,7 @@ async fn open_folder_dialog(
         let nodes = scan_directory(&folder_str, settings.show_gitignored);
         let _ = app.emit("fs:tree", &nodes);
 
-        let watcher = start_watcher(app.clone(), folder_str.clone());
+        let watcher = start_watcher(app.clone(), folder_str.clone(), settings.show_gitignored);
         let mut w = state.watcher.lock().await;
         *w = watcher;
 
@@ -120,9 +121,16 @@ async fn update_settings(
     state: tauri::State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), String> {
+    let binary_path = settings.binary_path.clone();
+
     let mut current = state.settings.lock().await;
     *current = settings;
-    save_settings(&current)
+    save_settings(&current)?;
+    drop(current);
+
+    let mut mgr = state.subprocess.lock().await;
+    mgr.apply_binary_path(binary_path);
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -131,13 +139,31 @@ pub fn run() {
 
     let loaded_settings = load_settings();
 
+    let mut subprocess_manager = SubprocessManager::new();
+    subprocess_manager.apply_binary_path(loaded_settings.binary_path.clone());
+
+    let auto_reattach = loaded_settings.auto_reattach;
+    let last_folder = loaded_settings.last_attached_folder.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
-            subprocess: Arc::new(Mutex::new(SubprocessManager::new())),
+            subprocess: Arc::new(Mutex::new(subprocess_manager)),
             watcher: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(loaded_settings)),
+        })
+        .setup(move |app| {
+            if auto_reattach {
+                let app_handle = app.handle().clone();
+                let state: tauri::State<AppState> = app.state();
+                let subprocess = state.subprocess.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut mgr = subprocess.lock().await;
+                    let _ = mgr.start(&app_handle, last_folder).await;
+                });
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             pi_command,

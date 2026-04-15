@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "@/store";
+import { newSession } from "@/lib/session-actions";
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -31,8 +32,7 @@ export function useKeyboardShortcuts() {
       // ⌘N → new session
       if (mod && e.key === "n") {
         e.preventDefault();
-        useStore.getState().clearMessages();
-        invoke("pi_command", { cmd: { type: "new_session" } }).catch(() => {});
+        newSession();
         return;
       }
 

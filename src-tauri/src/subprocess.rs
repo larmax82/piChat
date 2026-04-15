@@ -65,7 +65,7 @@ impl SubprocessManager {
         cmd.arg("--mode").arg("rpc").arg("--no-session");
 
         if let Some(ref dir) = work_dir {
-            cmd.arg("--cwd").arg(dir);
+            cmd.current_dir(dir);
             self.cwd = Some(dir.clone());
         }
 
@@ -185,8 +185,8 @@ impl SubprocessManager {
         Ok(())
     }
 
-    pub fn set_binary_path(&mut self, path: String) {
-        self.binary_path = Some(path);
+    pub fn apply_binary_path(&mut self, path: Option<String>) {
+        self.binary_path = path;
     }
 
     pub fn set_cwd(&mut self, cwd: String) {

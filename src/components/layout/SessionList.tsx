@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { loadSession } from "@/lib/session-persistence";
-import { invoke } from "@tauri-apps/api/core";
+import { newSession } from "@/lib/session-actions";
 import { MessageSquare, Plus } from "lucide-react";
 
 function timeAgo(timestamp: number): string {
@@ -15,16 +15,7 @@ export function SessionList() {
   const sessions = useStore((s) => s.sessions);
   const currentSessionId = useStore((s) => s.currentSessionId);
 
-  const handleNewSession = async () => {
-    const store = useStore.getState();
-    store.clearMessages();
-    store.setCurrentSessionId(crypto.randomUUID());
-    try {
-      await invoke("pi_command", { cmd: { type: "new_session" } });
-    } catch {
-      // pi may not be running
-    }
-  };
+  const handleNewSession = () => newSession();
 
   const handleSelectSession = (id: string) => {
     if (id === currentSessionId) return;

@@ -68,7 +68,7 @@ pub fn scan_directory(root: &str, show_gitignored: bool) -> Vec<FileNode> {
     nodes
 }
 
-pub fn start_watcher(app: AppHandle, root: String) -> Option<RecommendedWatcher> {
+pub fn start_watcher(app: AppHandle, root: String, show_gitignored: bool) -> Option<RecommendedWatcher> {
     let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
 
     let mut watcher = RecommendedWatcher::new(tx, Config::default().with_poll_interval(Duration::from_millis(200)))
@@ -87,6 +87,13 @@ pub fn start_watcher(app: AppHandle, root: String) -> Option<RecommendedWatcher>
         loop {
             match rx.recv_timeout(debounce) {
                 Ok(Ok(event)) => {
+                    // Rename/move events require a full rescan to get correct paths and depths
+                    if matches!(event.kind, notify::EventKind::Modify(notify::event::ModifyKind::Name(_))) {
+                        let nodes = scan_directory(&root, show_gitignored);
+                        let _ = app_handle.emit("fs:tree", &nodes);
+                        continue;
+                    }
+
                     for path in &event.paths {
                         let kind = match event.kind {
                             notify::EventKind::Create(_) => "created",
